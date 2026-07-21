@@ -25,12 +25,37 @@ const HEADLESS = process.env.PLAYWRIGHT_HEADLESS !== 'false';
 export const launchAndLogin = async () => {
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--mute-audio',
+      '--no-first-run',
+    ],
   });
   const page = await browser
     .newContext({ timezoneId: 'Asia/Kolkata' })
     .then((ctx) => ctx.newPage());
   page.setDefaultTimeout(60_000);
+
+  // The orders list is loaded via infinite scroll (see loadAllOrdersByScrolling) and can end up
+  // rendering thousands of rows - each with a product thumbnail - well beyond just the handful
+  // of "confirmed" orders being searched for. Images/fonts/media don't affect any selector or
+  // visibility check this automation relies on, so dropping them cuts memory/network load
+  // substantially on a RAM-constrained host (this is what caused the 512MB OOM on Render).
+  await page.route('**/*', (route) => {
+    const type = route.request().resourceType();
+    if (type === 'image' || type === 'media' || type === 'font') {
+      return route.abort();
+    }
+    return route.continue();
+  });
 
   await page.goto(process.env.OMS_URL, { waitUntil: 'networkidle' });
   await page.getByPlaceholder('Email Address').fill(process.env.OMS_EMAIL);
