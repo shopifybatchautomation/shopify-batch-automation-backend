@@ -11,9 +11,19 @@ const createBatch = asyncHandler(async (req, res) => {
 
   console.log('📦 createBatch controller called with socketId:', socketId || '(none)');
 
-  const result = await createBatchService(socketId);
+  // Respond immediately instead of awaiting the full run (which can take several minutes) -
+  // holding an HTTP connection open that long is fragile behind any reverse proxy/load balancer
+  // (e.g. Render), which can drop or time out the connection long before Playwright finishes.
+  // The frontend gets everything it needs - live progress, final stats, download URLs - via the
+  // 'batch-progress' socket event, so this response is just an acknowledgement that it started.
+  res.status(202).json(new ApiResponse(202, { socketId }, 'Batch started'));
 
-  return res.status(200).json(new ApiResponse(200, result, 'Batch created successfully'));
+  createBatchService(socketId).catch((err) => {
+    // createBatchService already emits a 'batch-progress' 'error' event and logs internally -
+    // this catch only exists so the rejection doesn't go unhandled (index.js exits the whole
+    // process on unhandledRejection).
+    console.error('[createBatch] Background batch run failed:', err.message);
+  });
 });
 
 // Returns the counters (total confirmed / selected / remaining / unmapped / unfulfilled /
